@@ -48,8 +48,11 @@ Template placeholders the workflow fills in automatically:
 
 A dashed-border box at the top of the template is left blank for the Keensight Capital logo — insert that manually.
 
-## 5. Run it
+## 5. Run it — two ways
 
+The workflow has two entry points that both run the same draft → review → Google Doc pipeline.
+
+**A. Manual button, inside n8n** (quick sanity check / fallback if the frontend has issues)
 1. Open the workflow in n8n.
 2. In the **Select Report** node, confirm/edit `filePath` to point at one of:
    - `/data/reports/NexoraCloud_Q2_2026_Report.pdf`
@@ -58,7 +61,29 @@ A dashed-border box at the top of the template is left blank for the Keensight C
 3. Click **Execute Workflow**.
 4. Open the new Google Doc created by the final node (its URL is in the last node's output, `googleDocUrl`).
 
-## 6. Cost
+**B. Upload from the web frontend** (the demo-ready version — see `frontend/README` below)
+1. In n8n, make sure the workflow is switched **Active** (top-right toggle) — the webhook only listens while the workflow is active, not just open.
+2. Start the frontend (see "Running the frontend" below) and upload any of the sample PDFs (or a real one).
+
+Company name, reporting quarter, and report date are read automatically from the PDF's own text (first line, and the "Quarter ended ..." line) — you don't need to type anything in for either path.
+
+## 6. Running the frontend
+
+A small React app (in `frontend/`) lets you upload a PDF in a browser instead of clicking around inside n8n — much better for a live demo.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the URL it prints (typically http://localhost:5173). The dev server proxies requests to `http://localhost:5678` for you, so there's no CORS setup needed — just make sure n8n is running and the workflow is **Active** first.
+
+**How it's wired:** the frontend POSTs the PDF as `multipart/form-data` under a field named `data` to `/webhook/lp-report-upload`, which n8n's Webhook node receives and feeds into the same pipeline as the manual trigger. The response is the same JSON the last node in the workflow outputs: `{ companyName, quarterLabel, finalParagraph, googleDocUrl }`.
+
+If the upload fails with a binary-data error: open the **Webhook: Report Uploaded** node in n8n and check that "Binary Data" is enabled with property name `data` — this option's exact location has shifted slightly across n8n versions, so it's worth a quick look if it doesn't work out of the box.
+
+## 7. Cost
 
 Both Claude steps use `claude-haiku-4-5-20251001` — the cheapest current model. A full run (draft + review on one ~1-page report) costs a small fraction of a cent; testing all three sample reports repeatedly should stay well under $1.
 

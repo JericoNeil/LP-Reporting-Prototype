@@ -9,7 +9,7 @@
       "typeVersion": 1,
       "position": [
         -1120,
-        0
+        -120
       ]
     },
     {
@@ -22,24 +22,6 @@
               "name": "filePath",
               "type": "string",
               "value": "/data/reports/Solvex_Diagnostics_Q2_2026_Report.pdf"
-            },
-            {
-              "id": "a2",
-              "name": "companyName",
-              "type": "string",
-              "value": "Solvex Diagnostics"
-            },
-            {
-              "id": "a3",
-              "name": "quarterLabel",
-              "type": "string",
-              "value": "Q2 2026"
-            },
-            {
-              "id": "a4",
-              "name": "reportDate",
-              "type": "string",
-              "value": "4 July 2026"
             }
           ]
         },
@@ -51,9 +33,9 @@
       "typeVersion": 3.4,
       "position": [
         -880,
-        0
+        -120
       ],
-      "notes": "Edit filePath/companyName/quarterLabel here to run the workflow for a different portfolio company PDF."
+      "notes": "Manual demo path only. Edit filePath here to run the workflow for a different portfolio company PDF, then use the Manual Trigger above."
     },
     {
       "parameters": {
@@ -66,8 +48,36 @@
       "typeVersion": 1,
       "position": [
         -640,
-        0
+        -120
       ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lp-report-upload",
+        "responseMode": "lastNode",
+        "options": {
+          "binaryPropertyName": "data",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f1a2b3c4-0001-4a4a-8a8a-000000000001",
+      "name": "Webhook: Report Uploaded",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        120
+      ],
+      "webhookId": "lp-report-upload",
+      "notes": "Frontend POSTs multipart/form-data here with the PDF under a field named 'data'. If binary doesn't arrive automatically, open this node and enable 'Binary Data' with property name 'data' in the UI (this toggle's exact param name has shifted across n8n versions)."
     },
     {
       "parameters": {
@@ -83,7 +93,21 @@
         -400,
         0
       ],
-      "notes": "Converts PDF binary to plain text before it reaches Claude, to keep token usage (and cost) low."
+      "notes": "Converts PDF binary to plain text before it reaches Claude, to keep token usage (and cost) low. Shared by both the manual-demo path and the webhook/upload path."
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.text || '';\nconst lines = text.split('\\n').map(l => l.trim()).filter(Boolean);\nconst companyName = lines[0] || 'Unknown Company';\nconst quarterMatch = text.match(/Quarter ended[^\\n]+/i);\nconst quarterLabel = quarterMatch ? quarterMatch[0].replace(/^Quarter ended\\s*/i, '').trim() : 'Current Quarter';\nconst reportDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });\nreturn [{ json: { text, companyName, quarterLabel, reportDate } }];"
+      },
+      "id": "b2c3d4e5-0002-4b4b-9b9b-000000000002",
+      "name": "Parse Report Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        0
+      ],
+      "notes": "Reads the company name and quarter straight off the report text (first line / 'Quarter ended ...' line), so this works for uploaded files with no manual setup."
     },
     {
       "parameters": {
@@ -114,7 +138,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -160,
+        80,
         0
       ],
       "credentials": {
@@ -127,14 +151,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst draftText = res.content && res.content[0] ? res.content[0].text : '';\nreturn [{\n  json: {\n    draftText,\n    sourceText: $('Extract from File').item.json.text,\n    companyName: $('Select Report').item.json.companyName,\n    quarterLabel: $('Select Report').item.json.quarterLabel,\n    reportDate: $('Select Report').item.json.reportDate\n  }\n}];"
+        "jsCode": "const res = $input.first().json;\nconst draftText = res.content && res.content[0] ? res.content[0].text : '';\nreturn [{\n  json: {\n    draftText,\n    sourceText: $('Parse Report Metadata').item.json.text,\n    companyName: $('Parse Report Metadata').item.json.companyName,\n    quarterLabel: $('Parse Report Metadata').item.json.quarterLabel,\n    reportDate: $('Parse Report Metadata').item.json.reportDate\n  }\n}];"
       },
       "id": "39a7b8cb-6647-43b3-822b-7295da78768e",
       "name": "Parse Draft Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        80,
+        320,
         0
       ]
     },
@@ -167,7 +191,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        320,
+        560,
         0
       ],
       "credentials": {
@@ -180,14 +204,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst finalParagraph = (res.content && res.content[0] ? res.content[0].text : '').trim();\nreturn [{\n  json: {\n    finalParagraph,\n    companyName: $('Select Report').item.json.companyName,\n    quarterLabel: $('Select Report').item.json.quarterLabel,\n    reportDate: $('Select Report').item.json.reportDate\n  }\n}];"
+        "jsCode": "const res = $input.first().json;\nconst finalParagraph = (res.content && res.content[0] ? res.content[0].text : '').trim();\nreturn [{\n  json: {\n    finalParagraph,\n    companyName: $('Parse Report Metadata').item.json.companyName,\n    quarterLabel: $('Parse Report Metadata').item.json.quarterLabel,\n    reportDate: $('Parse Report Metadata').item.json.reportDate\n  }\n}];"
       },
       "id": "a2a17212-878c-4d0c-8512-fb2e07b233e0",
       "name": "Parse Final Paragraph",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        560,
+        800,
         0
       ]
     },
@@ -211,7 +235,7 @@
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        800,
+        1040,
         0
       ],
       "credentials": {
@@ -238,7 +262,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1040,
+        1280,
         0
       ],
       "credentials": {
@@ -268,6 +292,12 @@
             },
             {
               "id": "b3",
+              "name": "quarterLabel",
+              "type": "string",
+              "value": "={{ $('Parse Final Paragraph').item.json.quarterLabel }}"
+            },
+            {
+              "id": "b4",
               "name": "finalParagraph",
               "type": "string",
               "value": "={{ $('Parse Final Paragraph').item.json.finalParagraph }}"
@@ -281,9 +311,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1280,
+        1520,
         0
-      ]
+      ],
+      "notes": "This node's output is also what gets returned as the JSON response to the frontend when the workflow is triggered via the webhook (responseMode: lastNode)."
     }
   ],
   "connections": {
@@ -320,7 +351,29 @@
         ]
       ]
     },
+    "Webhook: Report Uploaded": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parse Report Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Report Metadata": {
       "main": [
         [
           {
@@ -405,7 +458,7 @@
   "staticData": null,
   "meta": {
     "templateCredsSetupCompleted": false,
-    "description": "Two-step AI workflow (not a multi-agent system): Claude drafts an LP update paragraph from a portfolio company's quarterly PDF, flags KPI anomalies, then a second Claude pass reviews/refines it for factual accuracy and institutional tone before it is written into a branded Google Doc."
+    "description": "Two-step AI workflow (not a multi-agent system): Claude drafts an LP update paragraph from a portfolio company's quarterly PDF, flags KPI anomalies, then a second Claude pass reviews/refines it for factual accuracy and institutional tone before it is written into a branded Google Doc. Two entry points: a Manual Trigger for an in-n8n demo, and a Webhook for the React upload frontend."
   },
   "tags": []
 }
