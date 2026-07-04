@@ -1,0 +1,411 @@
+{
+  "name": "LP Reporting Assistant - Two-Step AI Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "3a6a20b0-47f7-41a0-b7a7-e930bc6f76c1",
+      "name": "Manual Trigger: New Quarterly Report",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "filePath",
+              "type": "string",
+              "value": "/data/reports/Solvex_Diagnostics_Q2_2026_Report.pdf"
+            },
+            {
+              "id": "a2",
+              "name": "companyName",
+              "type": "string",
+              "value": "Solvex Diagnostics"
+            },
+            {
+              "id": "a3",
+              "name": "quarterLabel",
+              "type": "string",
+              "value": "Q2 2026"
+            },
+            {
+              "id": "a4",
+              "name": "reportDate",
+              "type": "string",
+              "value": "4 July 2026"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4adfbb04-d948-4049-90c7-9c6ab16aa160",
+      "name": "Select Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -880,
+        0
+      ],
+      "notes": "Edit filePath/companyName/quarterLabel here to run the workflow for a different portfolio company PDF."
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.filePath }}",
+        "options": {}
+      },
+      "id": "21f099af-2a61-422a-9e85-5734369df45f",
+      "name": "Read PDF from Disk",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "67bea044-d7a5-4407-b62f-a079928ead4a",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "notes": "Converts PDF binary to plain text before it reaches Claude, to keep token usage (and cost) low."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"claude-haiku-4-5-20251001\",\n  max_tokens: 500,\n  system: \"You are a financial analyst supporting the investor relations team at a European growth buyout private equity firm. You will be given the extracted text of one portfolio company's quarterly report.\\n\\nDo two things:\\n1. Identify any KPI or development that looks unusual and may warrant investor attention. Use these as guidance, not hard rules: revenue growth (YoY) below 10%, any EBITDA margin decline of more than 2 percentage points, recurring revenue/ARR growth below 15%, or any explicitly mentioned delay, cancellation, cost pressure, or other negative qualitative development.\\n2. Draft a short paragraph (120-180 words) as a FIRST DRAFT of a limited partner (LP) quarterly update for this single portfolio company. Include the most important KPIs and the key qualitative development. If you identified unusual items in step 1, state them directly and factually - do not hide, soften, or omit them, but do not editorialize or speculate about causes or outcomes beyond what the source text states.\\n\\nOutput format: return ONLY the draft paragraph. No preamble, no headers, no markdown, no the word \\\"Draft\\\".\",\n  messages: [\n    { role: \"user\", content: \"Source report text:\\n\\n\" + $json.text }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "cd9594b1-5f45-4cfc-8e3d-615ae71c2c44",
+      "name": "Claude 1: Draft + Flag Anomalies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CRED_ID",
+          "name": "Anthropic API Key (x-api-key)"
+        }
+      },
+      "notes": "Uses claude-haiku-4-5 - cheap/fast, sufficient for structured extraction + first-draft writing."
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst draftText = res.content && res.content[0] ? res.content[0].text : '';\nreturn [{\n  json: {\n    draftText,\n    sourceText: $('Extract from File').item.json.text,\n    companyName: $('Select Report').item.json.companyName,\n    quarterLabel: $('Select Report').item.json.quarterLabel,\n    reportDate: $('Select Report').item.json.reportDate\n  }\n}];"
+      },
+      "id": "39a7b8cb-6647-43b3-822b-7295da78768e",
+      "name": "Parse Draft Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"claude-haiku-4-5-20251001\",\n  max_tokens: 400,\n  system: \"You are an editor at a European growth buyout private equity firm, reviewing a draft limited partner (LP) quarterly update paragraph before it is sent to institutional investors. You are given the original source report text and a first draft paragraph. Revise the draft according to these rules:\\n\\n1. Factual only - every claim must be directly traceable to the source text provided. Remove or rephrase anything that reads as speculation, forecast, or opinion not grounded in the source.\\n2. No promotional or marketing language (avoid words like \\\"exciting\\\", \\\"thrilled\\\", \\\"game-changing\\\", \\\"best-in-class\\\", \\\"robust success\\\"). Use neutral, institutional language.\\n3. No speculative language about future outcomes (avoid phrases like \\\"is expected to significantly boost X\\\" unless the source explicitly states that expectation).\\n4. Keep it concise: exactly one paragraph, 100-160 words.\\n5. Tone: measured, precise, and understated - appropriate for a sophisticated institutional LP audience at a European growth buyout fund. This is a factual update, not marketing collateral.\\n\\nReturn ONLY the final revised paragraph. No preamble, no headers, no markdown, no notes about what you changed.\",\n  messages: [\n    { role: \"user\", content: \"Source report text:\\n\\n\" + $json.sourceText + \"\\n\\n---\\n\\nDraft paragraph to review:\\n\\n\" + $json.draftText }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "9b55ca24-815f-4b14-8f5a-bd602f450453",
+      "name": "Claude 2: Review + Refine for LPs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CRED_ID",
+          "name": "Anthropic API Key (x-api-key)"
+        }
+      },
+      "notes": "Uses claude-haiku-4-5 - same low-cost model as step 1, kept deliberately simple/cheap for this prototype. Swap to a stronger model here later if review quality needs it."
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst finalParagraph = (res.content && res.content[0] ? res.content[0].text : '').trim();\nreturn [{\n  json: {\n    finalParagraph,\n    companyName: $('Select Report').item.json.companyName,\n    quarterLabel: $('Select Report').item.json.quarterLabel,\n    reportDate: $('Select Report').item.json.reportDate\n  }\n}];"
+      },
+      "id": "a2a17212-878c-4d0c-8512-fb2e07b233e0",
+      "name": "Parse Final Paragraph",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "1fe38Z4sHGlkAZLp7L4f547oLve-tqOHjjjGJWH0Zybw",
+          "mode": "id",
+          "cachedResultName": "LP Update Template \u2014 Keensight Capital",
+          "cachedResultUrl": "https://docs.google.com/document/d/1fe38Z4sHGlkAZLp7L4f547oLve-tqOHjjjGJWH0Zybw/edit"
+        },
+        "options": {
+          "name": "={{ 'LP Update - ' + $json.companyName + ' - ' + $json.quarterLabel }}"
+        }
+      },
+      "id": "2263fade-772e-47e7-869d-1d384518295d",
+      "name": "Copy LP Update Template",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        800,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CRED_ID",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Copies the branded 'LP Update Template' Google Doc so each run produces a new, separate document."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://docs.googleapis.com/v1/documents/' + $json.id + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  requests: [\n    { replaceAllText: { containsText: { text: '{{COMPANY_NAME}}', matchCase: true }, replaceText: $('Parse Final Paragraph').item.json.companyName } },\n    { replaceAllText: { containsText: { text: '{{QUARTER_LABEL}}', matchCase: true }, replaceText: $('Parse Final Paragraph').item.json.quarterLabel } },\n    { replaceAllText: { containsText: { text: '{{REPORT_DATE}}', matchCase: true }, replaceText: $('Parse Final Paragraph').item.json.reportDate } },\n    { replaceAllText: { containsText: { text: '{{LP_PARAGRAPH}}', matchCase: true }, replaceText: $('Parse Final Paragraph').item.json.finalParagraph } }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "1d576467-232c-46e6-aa65-bc0db1bdebcc",
+      "name": "Write Paragraph into Google Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        0
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "GOOGLE_DOCS_CRED_ID",
+          "name": "Google Docs account"
+        }
+      },
+      "notes": "Calls the Google Docs API batchUpdate directly to replace placeholder tokens in the copied template with the final LP paragraph and metadata."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "googleDocUrl",
+              "type": "string",
+              "value": "={{ 'https://docs.google.com/document/d/' + $('Copy LP Update Template').item.json.id + '/edit' }}"
+            },
+            {
+              "id": "b2",
+              "name": "companyName",
+              "type": "string",
+              "value": "={{ $('Parse Final Paragraph').item.json.companyName }}"
+            },
+            {
+              "id": "b3",
+              "name": "finalParagraph",
+              "type": "string",
+              "value": "={{ $('Parse Final Paragraph').item.json.finalParagraph }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a43c9e84-6b44-4269-8ede-fa523626093a",
+      "name": "Output: Doc Link + Paragraph",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1280,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger: New Quarterly Report": {
+      "main": [
+        [
+          {
+            "node": "Select Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Report": {
+      "main": [
+        [
+          {
+            "node": "Read PDF from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDF from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Claude 1: Draft + Flag Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude 1: Draft + Flag Anomalies": {
+      "main": [
+        [
+          {
+            "node": "Parse Draft Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Draft Response": {
+      "main": [
+        [
+          {
+            "node": "Claude 2: Review + Refine for LPs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude 2: Review + Refine for LPs": {
+      "main": [
+        [
+          {
+            "node": "Parse Final Paragraph",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Final Paragraph": {
+      "main": [
+        [
+          {
+            "node": "Copy LP Update Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy LP Update Template": {
+      "main": [
+        [
+          {
+            "node": "Write Paragraph into Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Paragraph into Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Output: Doc Link + Paragraph",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Two-step AI workflow (not a multi-agent system): Claude drafts an LP update paragraph from a portfolio company's quarterly PDF, flags KPI anomalies, then a second Claude pass reviews/refines it for factual accuracy and institutional tone before it is written into a branded Google Doc."
+  },
+  "tags": []
+}
