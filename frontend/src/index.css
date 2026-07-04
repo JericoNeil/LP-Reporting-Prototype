@@ -1,0 +1,26 @@
+:root {
+  font: 15px/1.5 Arial, Helvetica, sans-serif;
+  color: #222222;
+  background: #fafafa;
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1, h2, p {
+  margin: 0;
+}
