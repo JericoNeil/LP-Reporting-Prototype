@@ -10,7 +10,7 @@ This project automates the first draft of that process. You give it a company's 
 
 ## How it works, step by step
 
-1. **You start it** by clicking a button (this stands in for "a new quarterly report just came in").
+1. **You start it** — either by uploading a PDF in a simple web page, or by clicking a button inside the automation tool (both stand in for "a new quarterly report just came in").
 2. **It reads the PDF** — a real quarterly report from one company.
 3. **It converts the PDF to plain text**, which is a quick, low-cost step that makes the next part cheaper and faster.
 4. **An AI model reads that text and writes a first draft** of the update paragraph, and flags anything that looks unusual (like slower growth than usual, or a delayed product launch) so it doesn't get glossed over.
@@ -25,6 +25,7 @@ This is a two-step AI workflow, not an autonomous system — it drafts, a person
 |---|---|
 | `reports/` | 3 made-up sample quarterly reports (PDFs), used to test the assistant |
 | `n8n/` | The actual automation, built in a tool called n8n, plus setup instructions |
+| `frontend/` | A simple web page where you upload a PDF and see the result — optional, nicer than clicking around inside n8n |
 | `docker-compose.yml` | One command to run the automation tool on your own computer, for free |
 | `scripts/generate_reports.py` | Recreates the 3 sample PDFs if needed |
 | `scripts/test_pipeline.py` | Lets you test the AI writing steps directly, without opening the automation tool |
@@ -39,7 +40,7 @@ docker compose up -d
 open http://localhost:5678
 ```
 
-Then follow the instructions in `n8n/SETUP.md` to load the automation, connect it to an AI account and a Google account, and run it.
+Then follow the instructions in `n8n/SETUP.md` to load the automation, connect it to an AI account and a Google account, and run it — including the optional web page for uploading a report.
 
 ## Cost
 
