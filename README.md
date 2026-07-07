@@ -17,6 +17,7 @@ An AI-assisted tool that turns raw quarterly reports from portfolio companies in
 9. [Safety: a human is always in the loop](#9-safety-a-human-is-always-in-the-loop)
 10. [Limitations of the prototype](#10-limitations-of-the-prototype)
 11. [How this could be improved and taken to production](#11-how-this-could-be-improved-and-taken-to-production)
+12. [The n8n workflow, node by node](#12-the-n8n-workflow-node-by-node)
 
 ---
 
@@ -173,6 +174,20 @@ This prototype proves the concept. A production version could add:
 - Model choice tuned per step: a cheaper model for extraction, a stronger one for the final review.
 
 **In short:** the hard part, reliably turning messy, varied reports into a clean, fact-checked, branded quarterly report, already works. The path to production is mostly about governance, reliability, and integration with the firm's existing systems.
+
+## 12. The n8n workflow, node by node
+
+Section 4 described the pipeline in plain terms. This section walks through the actual automation (`n8n/lp_reporting_assistant_workflow.json`), which is organized into five stages left to right, each marked with an on-canvas note so it can be read like a diagram during a demo.
+
+**Stage 1: Intake.** The workflow has two possible starting points. `Manual Trigger: New Quarterly Report` → `Select Report` → `Read PDF from Disk` is used for local testing: it picks a PDF that's already sitting on disk. `Webhook: Report Uploaded` is the path the frontend actually uses: it listens on `POST /webhook/lp-report-upload` and receives a PDF as `multipart/form-data`. Both paths feed into `Extract from File`, which converts the PDF into plain text. Doing this conversion once, up front, keeps every downstream step working with cheap text instead of an image.
+
+**Stage 2: Metadata and two-step AI drafting.** `Parse Report Metadata` is a small script that reads the company name and the reporting quarter straight out of the extracted text (no manual data entry needed). `Claude 1: Draft + Flag Anomalies` then reads the full report and returns a structured result: a first-draft update paragraph, a key-metrics table, revenue and margin trends, the revenue-by-segment split, and a list of watch items worth an investor's attention. `Parse Draft Response` turns that into a clean object the rest of the workflow can use. `Claude 2: Review + Refine for LPs` then acts purely as an editor on the narrative paragraph: it removes speculation and promotional language, checks every claim against the source report, and tightens the tone. `Parse Final Paragraph` extracts the reviewed text, and `Build Section Content` turns the whole structured result into the QuickChart URLs and text blocks the document itself needs.
+
+**Stage 3: Drive folder structure.** This stage keeps every quarter's output in one predictable place. `Find Keensight Parent Folder` looks for the top-level folder in Drive; `Parent Folder Exists?` branches into `Create Keensight Parent Folder` the first time only. `Normalize Parent Folder Id` reconciles the two branches back into one value, and the same find-or-create pattern repeats one level down for the dated quarter subfolder (`Find Quarter Folder` → `Folder Exists?` → `Create Quarter Folder` → `Normalize Folder Id`).
+
+**Stage 4: Quarterly document lookup.** `Find Quarter Doc` checks whether a Google Doc already exists for this quarter. `Doc Exists?` branches: if not, `Create Quarter Doc from Template` copies the firm's real investor-report template into the quarter folder, preserving the cover page and firm introduction exactly as they are. `Normalize Doc Id` merges the two branches, and `Is New Doc?` decides which write path runs next, since a brand-new document needs its section written differently from one that already has other companies in it.
+
+**Stage 5: Write, style, and output.** `Write Section: First Company (Template)` writes directly into the fresh template copy; `Write Section: Append Company` inserts a page break and writes into a document that already has content. Both converge at `Get Document`. Styling then runs in two passes, which turned out to be necessary because filling text into one table shifts the character indices of every table after it: pass one (`Compute Cell Fills` → `Apply Cell Fills`) writes plain text into every table cell only; the document is then re-fetched (`Get Document 2`) so all indices are known and settled, and pass two (`Compute Styles` → `Apply Styles`) applies fonts, colours, bold, and bullet-style resets against that settled document. `Output: Doc Link + Paragraph` returns the finished document link and the reviewed paragraph, which is also what the webhook sends back to the frontend.
 
 ---
 
