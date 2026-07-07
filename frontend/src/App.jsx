@@ -3,76 +3,138 @@ import './App.css'
 
 const WEBHOOK_PATH = '/webhook/lp-report-upload'
 
+const SAMPLE_REPORTS = [
+  { label: 'NexoraCloud', file: 'NexoraCloud_Q2_2026_Report.pdf' },
+  { label: 'Solvex Diagnostics', file: 'Solvex_Diagnostics_Q2_2026_Report.pdf' },
+  { label: 'Kestrel Data Systems', file: 'Kestrel_Data_Systems_Q2_2026_Report.pdf' },
+]
+
 function App() {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([]) // File[]
   const [status, setStatus] = useState('idle') // idle | uploading | success | error
-  const [result, setResult] = useState(null)
+  const [progress, setProgress] = useState({ current: 0, total: 0, label: '' })
+  const [companies, setCompanies] = useState([]) // { companyName, quarterLabel, finalParagraph }
+  const [docUrl, setDocUrl] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [dragActive, setDragActive] = useState(false)
   const inputRef = useRef(null)
 
-  const pickFile = useCallback((f) => {
-    if (!f) return
-    if (f.type !== 'application/pdf') {
+  const addFiles = useCallback((incoming) => {
+    const pdfs = Array.from(incoming || []).filter((f) => f.type === 'application/pdf')
+    if (pdfs.length === 0) {
       setStatus('error')
-      setErrorMessage('Please choose a PDF file.')
+      setErrorMessage('Please choose PDF files.')
       return
     }
-    setFile(f)
+    setFiles((prev) => {
+      // de-dupe by name
+      const names = new Set(prev.map((f) => f.name))
+      return [...prev, ...pdfs.filter((f) => !names.has(f.name))]
+    })
     setStatus('idle')
     setErrorMessage('')
-    setResult(null)
   }, [])
 
   const onDrop = useCallback(
     (e) => {
       e.preventDefault()
       setDragActive(false)
-      pickFile(e.dataTransfer.files?.[0])
+      addFiles(e.dataTransfer.files)
     },
-    [pickFile]
+    [addFiles]
   )
 
-  const onSubmit = useCallback(async () => {
-    if (!file) return
+  const removeFile = useCallback((name) => {
+    setFiles((prev) => prev.filter((f) => f.name !== name))
+  }, [])
+
+  const loadAllSamples = useCallback(async () => {
     setStatus('uploading')
     setErrorMessage('')
     try {
-      const formData = new FormData()
-      formData.append('data', file, file.name)
+      const loaded = await Promise.all(
+        SAMPLE_REPORTS.map(async (sample) => {
+          const res = await fetch(`/samples/${sample.file}`)
+          if (!res.ok) throw new Error(`Could not load ${sample.label}.`)
+          const blob = await res.blob()
+          return new File([blob], sample.file, { type: 'application/pdf' })
+        })
+      )
+      setFiles(loaded)
+      setStatus('idle')
+    } catch (err) {
+      console.error(err)
+      setStatus('error')
+      setErrorMessage(err.message)
+    }
+  }, [])
 
-      const res = await fetch(WEBHOOK_PATH, {
-        method: 'POST',
-        body: formData,
-      })
+  const onSubmit = useCallback(async () => {
+    if (files.length === 0) return
+    setStatus('uploading')
+    setErrorMessage('')
+    setCompanies([])
+    setDocUrl('')
 
-      if (!res.ok) {
-        throw new Error(`Workflow returned ${res.status}`)
+    const collected = []
+    try {
+      // Process sequentially: each report is drafted, reviewed, and written into the
+      // same quarterly Google Doc before the next one starts. Awaiting each request
+      // in turn also avoids a Drive indexing race (the doc exists and is indexed by
+      // the time the next company looks for it).
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i]
+        setProgress({ current: i + 1, total: files.length, label: f.name })
+
+        const formData = new FormData()
+        formData.append('data', f, f.name)
+
+        const res = await fetch(WEBHOOK_PATH, { method: 'POST', body: formData })
+        if (!res.ok) {
+          let detail = `status ${res.status}`
+          try {
+            const errBody = await res.json()
+            if (errBody?.message) detail = errBody.message
+          } catch {
+            // response wasn't JSON; keep the status code
+          }
+          throw new Error(`Failed on ${f.name} (${detail}). Check the n8n Executions tab.`)
+        }
+
+        const data = await res.json()
+        collected.push(data)
+        setCompanies([...collected])
+        if (data.googleDocUrl) setDocUrl(data.googleDocUrl)
       }
 
-      const data = await res.json()
-      setResult(data)
       setStatus('success')
     } catch (err) {
       console.error(err)
       setStatus('error')
-      setErrorMessage(
-        'Could not reach the workflow. Make sure n8n is running (docker compose up -d) and the workflow is active.'
-      )
+      if (err instanceof TypeError) {
+        setErrorMessage(
+          'Could not reach the workflow. Make sure n8n is running (docker compose up -d) and the workflow is active.'
+        )
+      } else {
+        setErrorMessage(err.message)
+      }
     }
-  }, [file])
+  }, [files])
 
   const reset = useCallback(() => {
-    setFile(null)
-    setResult(null)
+    setFiles([])
+    setCompanies([])
+    setDocUrl('')
     setStatus('idle')
     setErrorMessage('')
+    setProgress({ current: 0, total: 0, label: '' })
     if (inputRef.current) inputRef.current.value = ''
   }, [])
 
   return (
     <div className="page">
       <header className="header">
+        <img src="/keensight-logo.png" alt="Keensight Capital" className="brand-logo" />
         <div className="brand-mark">LP Reporting Assistant</div>
         <div className="brand-sub">Two-step AI workflow &mdash; draft, then review</div>
       </header>
@@ -80,15 +142,15 @@ function App() {
       <main className="card">
         {status !== 'success' && (
           <>
-            <h1 className="title">Upload a quarterly report</h1>
+            <h1 className="title">Generate a quarterly LP report</h1>
             <p className="subtitle">
-              Drop in a portfolio company&rsquo;s quarterly report (PDF) to generate a draft LP
-              update paragraph, reviewed for factual accuracy and tone before it reaches the
-              template document.
+              Add each portfolio company&rsquo;s quarterly report (PDF). Every report is drafted and
+              reviewed by Claude, then compiled into a single branded quarterly document &mdash; a
+              Keensight cover and introduction, followed by one page per company.
             </p>
 
             <label
-              className={`dropzone ${dragActive ? 'dropzone--active' : ''} ${file ? 'dropzone--has-file' : ''}`}
+              className={`dropzone ${dragActive ? 'dropzone--active' : ''} ${files.length ? 'dropzone--has-file' : ''}`}
               onDragOver={(e) => {
                 e.preventDefault()
                 setDragActive(true)
@@ -100,67 +162,107 @@ function App() {
                 ref={inputRef}
                 type="file"
                 accept="application/pdf"
-                onChange={(e) => pickFile(e.target.files?.[0])}
+                multiple
+                onChange={(e) => addFiles(e.target.files)}
                 hidden
               />
-              {file ? (
-                <span className="dropzone-text">
-                  <strong>{file.name}</strong>
-                  <span className="dropzone-hint">Click to choose a different file</span>
-                </span>
-              ) : (
-                <span className="dropzone-text">
-                  <strong>Click to select a PDF</strong>
-                  <span className="dropzone-hint">or drag and drop it here</span>
-                </span>
-              )}
+              <span className="dropzone-text">
+                <strong>Click to add PDF reports</strong>
+                <span className="dropzone-hint">or drag and drop them here</span>
+              </span>
             </label>
+
+            {files.length > 0 && (
+              <ul className="file-list">
+                {files.map((f, i) => (
+                  <li key={f.name} className="file-item">
+                    <span className="file-index">{i + 1}</span>
+                    <span className="file-name">{f.name}</span>
+                    {status !== 'uploading' && (
+                      <button
+                        type="button"
+                        className="file-remove"
+                        onClick={() => removeFile(f.name)}
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="sample-picker">
+              <span className="sample-picker-label">For the demo:</span>
+              <div className="sample-picker-buttons">
+                <button
+                  type="button"
+                  className="sample-chip"
+                  disabled={status === 'uploading'}
+                  onClick={loadAllSamples}
+                >
+                  Load all 3 sample reports
+                </button>
+              </div>
+            </div>
 
             {status === 'error' && <p className="error-text">{errorMessage}</p>}
 
             <button
               className="primary-button"
-              disabled={!file || status === 'uploading'}
+              disabled={files.length === 0 || status === 'uploading'}
               onClick={onSubmit}
             >
-              {status === 'uploading' ? 'Drafting and reviewing…' : 'Generate LP Update'}
+              {status === 'uploading'
+                ? `Processing ${progress.current} of ${progress.total}…`
+                : `Generate quarterly report${files.length ? ` (${files.length})` : ''}`}
             </button>
 
             {status === 'uploading' && (
               <p className="progress-note">
-                Extracting text &rarr; Claude draft &amp; anomaly check &rarr; Claude review &rarr;
-                writing to Google Doc&hellip;
+                {progress.label} &mdash; extracting &rarr; Claude draft &amp; anomaly check &rarr;
+                Claude review &rarr; writing into the quarterly document&hellip;
               </p>
             )}
           </>
         )}
 
-        {status === 'success' && result && (
+        {status === 'success' && (
           <div className="result">
             <div className="result-meta">
-              <span className="result-label">Portfolio Company</span>
-              <h2 className="result-company">{result.companyName}</h2>
-              <span className="result-quarter">{result.quarterLabel}</span>
+              <span className="result-label">Quarterly Report Generated</span>
+              <h2 className="result-company">
+                {companies[0]?.quarterLabel || 'Current Quarter'}
+              </h2>
+              <span className="result-quarter">
+                {companies.length} portfolio {companies.length === 1 ? 'company' : 'companies'} compiled
+              </span>
             </div>
 
             <div className="result-paragraph">
-              <span className="result-label">Draft LP Update Paragraph</span>
-              <p>{result.finalParagraph}</p>
+              <span className="result-label">Companies included</span>
+              {companies.map((c) => (
+                <div key={c.companyName} className="company-block">
+                  <strong className="company-name">{c.companyName}</strong>
+                  <p className="company-para">{c.finalParagraph}</p>
+                </div>
+              ))}
             </div>
 
             <div className="result-actions">
-              {result.googleDocUrl && (
+              {docUrl && (
                 <a
                   className="primary-button primary-button--link"
-                  href={result.googleDocUrl}
+                  href={docUrl}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Open in Google Docs
+                  Open quarterly report in Google Docs
                 </a>
               )}
               <button className="secondary-button" onClick={reset}>
-                Process another report
+                Start a new quarter
               </button>
             </div>
           </div>
